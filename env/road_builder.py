@@ -1474,11 +1474,11 @@ def _build_sadang_manual(road, out_dir):
     ET.SubElement(ET.SubElement(cfg, "gui_only"), "gui-settings-file", value="sadang.gui.xml")
     save(cfg, "sadang.sumocfg")
     if road.get("yangjae_only", False):
-        return _build_yangjae_only(out_dir)
+        return _build_yangjae_only(out_dir, road)
     return os.path.join(out_dir, "sadang.sumocfg")
 
 
-def _build_yangjae_only(out_dir):
+def _build_yangjae_only(out_dir, road):
     """원본 도로를 보존하며 양재IC 주변만 별도의 SUMO 도로망으로 만든다."""
     import copy
     import xml.etree.ElementTree as ET
@@ -1516,6 +1516,11 @@ def _build_yangjae_only(out_dir):
                     if key in old.attrib:
                         lane.set(key, old.get(key))
     reduced_tree.write(net_file, encoding="utf-8", xml_declaration=True)
+    loop = road.get("seocho_dogok_loop", {})
+    loop_path = []
+    if loop.get("enabled"):
+        loop_path = _extend_seocho_dogok_loop(out_dir, loop)
+        reduced = ET.parse(net_file).getroot()
 
     source_routes = ET.parse(os.path.join(out_dir, "sadang.rou.xml")).getroot()
     output_routes = ET.Element("routes")
@@ -1543,6 +1548,21 @@ def _build_yangjae_only(out_dir):
         ET.SubElement(output_routes, "flow", id=rid+"_flow", type="normal", route=rid,
                       begin="0", end="100000", period=str(period),
                       departLane="best", departSpeed="0")
+    if loop_path:
+        # 두 바퀴 연속 주행해 도로가 한 방향으로 실제 이어지는지 확인할 수 있다.
+        ET.SubElement(output_routes, "route", id="seocho_dogok_circuit", edges=" ".join(loop_path*2))
+        ET.SubElement(output_routes, "flow", id="seocho_dogok_circuit_flow", type="normal",
+                      route="seocho_dogok_circuit", begin="0", end="100000", period="18",
+                      departLane="best", departSpeed="0")
+        for rid, sequence in {
+            "namobu_east": ["circuit_seocho_yangjae", "circuit_yangjae_maebong", "circuit_maebong_east"],
+            "namobu_west": ["circuit_east_maebong", "circuit_maebong_yangjae", "circuit_yangjae_seocho"],
+            "eonju_south": ["circuit_north_maebong", "circuit_maebong_guryong", "circuit_guryong_south"],
+            "eonju_north": ["circuit_south_guryong", "circuit_guryong_maebong", "circuit_maebong_north"],
+        }.items():
+            ET.SubElement(output_routes, "route", id=rid, edges=" ".join(sequence))
+            ET.SubElement(output_routes, "flow", id=rid+"_flow", type="normal", route=rid,
+                          begin="0", end="100000", period="30", departLane="best", departSpeed="0")
     ET.indent(output_routes)
     ET.ElementTree(output_routes).write(os.path.join(out_dir, "yangjae.rou.xml"),
                                         encoding="utf-8", xml_declaration=True)
@@ -1561,11 +1581,28 @@ def _build_yangjae_only(out_dir):
                 extra.append(copy.deepcopy(item))
         elif item.tag == "poi" and identifier in {"Yangjae_Start", "Yangjae_IC"}:
             extra.append(copy.deepcopy(item))
+    if loop_path:
+        _add_circuit_road_markings(extra, net_file)
+        for label, node in [("Seocho IC", "circuit_seocho"),
+                            ("Maebong", "circuit_maebong"),
+                            ("Guryong", "circuit_guryong")]:
+            point = reduced.find(f"junction[@id='{node}']")
+            ET.SubElement(extra, "poi", id=label.replace(" ", "_"),
+                          x=point.get("x"), y=str(float(point.get("y"))+45),
+                          color="255,180,50", layer="150", width="5", height="5")
     ET.ElementTree(extra).write(os.path.join(out_dir, "yangjae.stops.add.xml"),
                                 encoding="utf-8", xml_declaration=True)
     gui = ET.parse(os.path.join(out_dir, "sadang.gui.xml"))
     x1, y1, x2, y2 = map(float, reduced.find("location").get("convBoundary").split(","))
-    gui.find("viewport").set("zoom", str(100*max(x2-x1, y2-y1)/1400))
+    viewport = gui.find("viewport")
+    if loop_path:
+        start = reduced.find("junction[@id='yangjae_start']")
+        end = reduced.find("junction[@id='circuit_yeomgok']")
+        viewport.set("x", str((float(start.get("x"))+float(end.get("x")))/2))
+        viewport.set("y", str((float(start.get("y"))+float(end.get("y")))/2))
+        viewport.set("zoom", str(100*max(x2-x1, y2-y1)/850))
+    else:
+        viewport.set("zoom", str(100*max(x2-x1, y2-y1)/1400))
     gui.write(os.path.join(out_dir, "yangjae.gui.xml"), encoding="utf-8", xml_declaration=True)
     cfg = ET.Element("configuration")
     inp = ET.SubElement(cfg, "input")
@@ -1576,6 +1613,162 @@ def _build_yangjae_only(out_dir):
     cfg_path = os.path.join(out_dir, "yangjae.sumocfg")
     ET.ElementTree(cfg).write(cfg_path, encoding="utf-8", xml_declaration=True)
     return cfg_path
+
+
+def _extend_seocho_dogok_loop(out_dir, settings):
+    """기존 양재IC 밖에 서초·매봉·구룡을 잇는 개략 도로를 덧붙인다."""
+    import xml.etree.ElementTree as ET
+    path = os.path.join(out_dir, "yangjae.net.xml")
+    previous = ET.parse(path).getroot()
+    def xy(node):
+        p = previous.find(f"junction[@id='{node}']")
+        return float(p.get("x")), float(p.get("y"))
+    ax, ay = xy("gyeongbu_end")
+    bx, by = xy("yangjae_start")
+    previous.find("junction[@id='gyeongbu_end']").set("type", "priority")
+    ET.ElementTree(previous).write(os.path.join(out_dir, "yangjae.base.net.xml"),
+                                   encoding="utf-8", xml_declaration=True)
+    places = {
+        "circuit_seocho": (ax+150, ay+320, 0),
+        "circuit_yangjae": (ax+650, ay+320, 0),
+        "circuit_maebong": (ax+2200, ay+320, 0),
+        "circuit_guryong": (ax+2200, by-300, 0),
+        "circuit_yeomgok": (bx+400, by-300, 0),
+        "circuit_seocho_north": (ax-270, ay+690, 8),
+        "circuit_yangjae_north": (ax+650, ay+580, 0),
+        "circuit_yangjae_south": (ax+650, ay+60, 0),
+        "circuit_maebong_north": (ax+2200, ay+580, 0),
+        "circuit_maebong_east": (ax+2450, ay+320, 0),
+        "circuit_guryong_east": (ax+2450, by-300, 0),
+        "circuit_guryong_south": (ax+2200, by-550, 0),
+    }
+    nodes = ET.Element("nodes")
+    # 기존 본선의 막다른 끝을 분기점으로 바꾸어 서초IC 출구에 연결한다.
+    ET.SubElement(nodes, "node", id="gyeongbu_end", x=str(ax), y=str(ay), z="8", type="priority")
+    for name, (x, y, z) in places.items():
+        ET.SubElement(nodes, "node", id=name, x=str(x), y=str(y), z=str(z),
+                      type="traffic_light" if name in {"circuit_yangjae", "circuit_maebong", "circuit_guryong"} else "priority")
+    ET.ElementTree(nodes).write(os.path.join(out_dir, "circuit.nod.xml"), encoding="utf-8", xml_declaration=True)
+    edges = ET.Element("edges")
+    main, side = int(settings["main_lanes"]), int(settings["side_lanes"])
+    specs = [
+        ("circuit_seocho_exit", "gyeongbu_end", "circuit_seocho", 2),
+        ("circuit_gyeongbu_continue", "gyeongbu_end", "circuit_seocho_north", 5),
+        ("circuit_seocho_yangjae", "circuit_seocho", "circuit_yangjae", main),
+        ("circuit_yangjae_seocho", "circuit_yangjae", "circuit_seocho", main),
+        ("circuit_yangjae_maebong", "circuit_yangjae", "circuit_maebong", main),
+        ("circuit_maebong_yangjae", "circuit_maebong", "circuit_yangjae", main),
+        ("circuit_maebong_guryong", "circuit_maebong", "circuit_guryong", main),
+        ("circuit_guryong_maebong", "circuit_guryong", "circuit_maebong", main),
+        ("circuit_guryong_yeomgok", "circuit_guryong", "circuit_yeomgok", main),
+        ("circuit_yeomgok_guryong", "circuit_yeomgok", "circuit_guryong", main),
+        ("circuit_yeomgok_yangjae", "circuit_yeomgok", "yangjae_start", side),
+        ("circuit_yangjae_north", "circuit_yangjae", "circuit_yangjae_north", side),
+        ("circuit_north_yangjae", "circuit_yangjae_north", "circuit_yangjae", side),
+        ("circuit_yangjae_south", "circuit_yangjae", "circuit_yangjae_south", side),
+        ("circuit_south_yangjae", "circuit_yangjae_south", "circuit_yangjae", side),
+        ("circuit_maebong_north", "circuit_maebong", "circuit_maebong_north", side),
+        ("circuit_north_maebong", "circuit_maebong_north", "circuit_maebong", side),
+        ("circuit_maebong_east", "circuit_maebong", "circuit_maebong_east", side),
+        ("circuit_east_maebong", "circuit_maebong_east", "circuit_maebong", side),
+        ("circuit_guryong_east", "circuit_guryong", "circuit_guryong_east", side),
+        ("circuit_east_guryong", "circuit_guryong_east", "circuit_guryong", side),
+        ("circuit_guryong_south", "circuit_guryong", "circuit_guryong_south", side),
+        ("circuit_south_guryong", "circuit_guryong_south", "circuit_guryong", side),
+    ]
+    for eid, start, end, lanes in specs:
+        attrs = {"from": start, "to": end, "numLanes": str(lanes),
+                 "speed": "13.89", "width": "3.25", "priority": "2"}
+        if eid == "circuit_seocho_exit":
+            # 고속도로 본선에서 접선 방향으로 서서히 빠져나온다.
+            attrs["shape"] = " ".join(f"{x},{y},{z}" for x, y, z in [
+                (ax,ay,8), (ax-38,ay+55,7), (ax-48,ay+130,4),
+                (ax-18,ay+210,1), (ax+48,ay+275,0), (ax+150,ay+320,0)])
+        elif eid == "circuit_yeomgok_yangjae":
+            # 두 접속부의 차로 방향을 따르는 베지어 곡선으로 급격한 꺾임을 없앤다.
+            p0, p1 = (bx+400, by-300), (bx+180, by-300)
+            p2, p3 = (bx+145, by+120), (bx, by)
+            curve = []
+            for step in range(41):
+                t = step/40
+                x = (1-t)**3*p0[0]+3*(1-t)**2*t*p1[0]+3*(1-t)*t*t*p2[0]+t**3*p3[0]
+                y = (1-t)**3*p0[1]+3*(1-t)**2*t*p1[1]+3*(1-t)*t*t*p2[1]+t**3*p3[1]
+                curve.append((x, y))
+            attrs["shape"] = " ".join(f"{x:.2f},{y:.2f},0" for x, y in curve)
+        ET.SubElement(edges, "edge", id=eid, **attrs)
+    ET.ElementTree(edges).write(os.path.join(out_dir, "circuit.edg.xml"), encoding="utf-8", xml_declaration=True)
+    connections = ET.Element("connections")
+    for lane in range(5):
+        ET.SubElement(connections, "connection", **{"from": "gyeongbu_out", "to": "circuit_gyeongbu_continue",
+                      "fromLane": str(lane), "toLane": str(lane)})
+    for lane in range(2):
+        ET.SubElement(connections, "connection", **{"from": "gyeongbu_out", "to": "circuit_seocho_exit",
+                      "fromLane": str(lane), "toLane": str(lane)})
+    ET.ElementTree(connections).write(os.path.join(out_dir, "circuit.con.xml"),
+                                      encoding="utf-8", xml_declaration=True)
+    result = subprocess.run([checkBinary("netconvert"), "--sumo-net-file", "yangjae.base.net.xml",
+                             "--node-files", "circuit.nod.xml", "--edge-files", "circuit.edg.xml",
+                             "--connection-files", "circuit.con.xml",
+                             "--offset.disable-normalization", "true", "--no-turnarounds", "true",
+                             "--no-warnings", "true", "-o", "yangjae.circuit.net.xml"],
+                            cwd=out_dir, capture_output=True, text=True, encoding="utf-8")
+    if result.returncode:
+        raise RuntimeError(result.stderr)
+    tree = ET.parse(os.path.join(out_dir, "yangjae.circuit.net.xml"))
+    network = tree.getroot()
+    old_edges = {e.get("id"): e for e in previous.findall("edge")}
+    for e in network.findall("edge"):
+        old = old_edges.get(e.get("id"))
+        if old is None or e.get("id") in {"gyeongbu_out", "heolleung_start"}:
+            continue
+        old_lanes = {l.get("id"): l for l in old.findall("lane")}
+        for lane in e.findall("lane"):
+            old_lane = old_lanes.get(lane.get("id"))
+            if old_lane is not None:
+                for key in ("shape", "length"):
+                    if key in old_lane.attrib:
+                        lane.set(key, old_lane.get(key))
+    tree.write(path, encoding="utf-8", xml_declaration=True)
+    return ["heolleung_start", "yangjae_ramp", "yangjae_daero_a", "yangjae_to_gyeongbu",
+            "gyeongbu_out", "circuit_seocho_exit", "circuit_seocho_yangjae",
+            "circuit_yangjae_maebong", "circuit_maebong_guryong", "circuit_guryong_yeomgok",
+            "circuit_yeomgok_yangjae"]
+
+
+def _add_circuit_road_markings(additional, net_file):
+    """고도 표시 모드에서도 새 도로의 경계·차로선을 또렷하게 표시한다."""
+    import xml.etree.ElementTree as ET
+    from sumolib.net import readNet
+    from sumolib.geomhelper import move2side, positionAtShapeOffset
+    net = readNet(net_file)
+    def line(identifier, points, width, color, layer):
+        shape = " ".join(f"{p[0]:.2f},{p[1]:.2f}" for p in points)
+        ET.SubElement(additional, "poly", id=identifier, shape=shape, color=color,
+                      fill="false", lineWidth=str(width), layer=str(layer))
+    for junction in ET.parse(net_file).getroot().findall("junction"):
+        if (junction.get("id", "").startswith("circuit_") or junction.get("id") in {"gyeongbu_end", "yangjae_start"}) and junction.get("shape"):
+            ET.SubElement(additional, "poly", id="pavement_"+junction.get("id"),
+                          shape=" ".join(",".join(p.split(",")[:2]) for p in junction.get("shape").split()),
+                          color="67,100,140" if junction.get("id") == "gyeongbu_end" else "55,55,55",
+                          fill="true", layer=str(float(junction.get("z", "0"))+.02))
+    for edge in net.getEdges():
+        if not edge.getID().startswith("circuit_"):
+            continue
+        lanes = edge.getLanes()
+        for lane in lanes:
+            shape = lane.getShape3D()
+            if len(shape) < 2:
+                continue
+            height = min(p[2] for p in shape)+.06
+            if lane.getIndex() == 0 or lane.getIndex() == len(lanes)-1:
+                offset = lane.getWidth()/2 * (1 if lane.getIndex() == 0 else -1)
+                line("circuit_border_"+lane.getID(), move2side([p[:2] for p in shape], offset), .14, "230,230,230", height)
+            if lane.getIndex() < len(lanes)-1:
+                border = move2side([p[:2] for p in shape], -lane.getWidth()/2)
+                length = lane.getLength()
+                for n in range(0, int(length), 9):
+                    pts = [positionAtShapeOffset(border, n), positionAtShapeOffset(border, min(n+4, length))]
+                    line("circuit_dash_"+lane.getID()+"_"+str(n), pts, .13, "230,230,230", height)
 
 
 def _build_yangjae_isu(road, ego, out_dir):

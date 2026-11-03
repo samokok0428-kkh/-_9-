@@ -18,6 +18,8 @@ road_builder.py가 SUMO 도로 파일(.net.xml 등)을 자동으로 다시 만�
 SADANG_MANUAL = {
     "network": "sadang_manual",
     "yangjae_only": True,  # 선암·사당 구간은 원본에 보관하고 양재IC만 실행
+    # 실제 경로를 참고한 정돈된 개략 모형. 차로 수와 신호는 추후 현장 대조.
+    "seocho_dogok_loop": {"enabled": True, "main_lanes": 3, "side_lanes": 2},
     "arm_length": 350,           # 사거리 중심에서 각 방향 끝까지 거리(m)
     "gangnam_lanes": 3,              # 한 방향 본선 차로 수 (임시)
     "gangnam_speed": 22.22,         # 본선 임시 80km/h
