@@ -1,5 +1,5 @@
 """POMDP trajectory data collector for the SUMO highway environment.
-
+// data 수집 파일
 저장 단위는 POMDP transition 하나다:
     (o_t, a_t, r_t, o_{t+1}, terminated, truncated, s_t, s_{t+1})
 

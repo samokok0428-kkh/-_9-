@@ -1,0 +1,8 @@
+# Regeneratable local download/import cache (runtime assets remain tracked).
+tile_*.xml
+source.osm.xml
+full.net.xml
+import.log
+keep.txt
+before-route.patch
+__pycache__/

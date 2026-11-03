@@ -43,6 +43,15 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 
 def print_summary():
     """현재 road_config 내용을 표로 요약 출력."""
+    if ROAD.get("network") == "yangjae_isu":
+        print("현대차 양재 사옥 부근 → 강남순환로 → 사당IC → 사당역 → 이수역")
+        print(f"선택 경로: 약 {ROAD['length']/1000:.2f} km (교차로 내부 제외)")
+        print("차로 수·속도: 지도 구간별 설정 / 신호: SUMO 생성값")
+        print("일반 차량 주행 미리보기 (자율주행 모델 없음)" if ROAD.get("preview_traffic")
+              else "도로 전용 미리보기: 차량 없음")
+        print("일반 차량 모드: 사당역 부근 확대" if ROAD.get("preview_traffic")
+              else "하늘색 선: 선택한 주행 경로 / 주황색 점: 주요 지점")
+        return
     print("─" * 46)
     print(" 현재 도로 설정 (env/road_config.py)")
     print("─" * 46)
@@ -60,6 +69,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="도로 구조를 GUI로 확인")
     parser.add_argument("--netedit", action="store_true",
                         help="sumo-gui 대신 netedit(도로 편집기)로 열기")
+    parser.add_argument("--sadang-manual", action="store_true",
+                        help="양재→선암→사당→이수 수작업 도로 미리보기(기본)")
+    parser.add_argument("--osm-preview", action="store_false", dest="sadang_manual",
+                        help="이전 OSM 도로 미리보기를 명시적으로 선택")
+    parser.set_defaults(sadang_manual=True)
     parser.add_argument("--nogui", action="store_true",
                         help="화면 없이 설정 검증만 (GUI 없는 환경용)")
     parser.add_argument("--seconds", type=int, default=120,
@@ -68,10 +82,21 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # 1) road_config 기준으로 SUMO 파일 (재)생성 — 수정사항이 즉시 반영된다
-    sumocfg = road_builder.build(ROAD, EGO, TRAFFIC, os.path.join(BASE, "env", "sumo"))
-    net_file = os.path.join(BASE, "env", "sumo", "highway.net.xml")
+    if args.sadang_manual:
+        from env.road_config import SADANG_MANUAL
+        output_dir = os.path.join(BASE, "env", "sumo", "sadang_manual")
+        sumocfg = road_builder.build(SADANG_MANUAL, EGO, TRAFFIC, output_dir)
+        net_file = os.path.join(output_dir, "yangjae.net.xml" if SADANG_MANUAL.get("yangjae_only") else "sadang.net.xml")
+    else:
+        sumocfg = road_builder.build(ROAD, EGO, TRAFFIC, os.path.join(BASE, "env", "sumo"))
+        net_file = os.path.join(BASE, "env", "sumo", "highway.net.xml")
     print(f"도로 생성 완료: {sumocfg}")
-    print_summary()
+    if args.sadang_manual:
+        print("양재IC 및 경부고속도로 미리보기" if SADANG_MANUAL.get("yangjae_only")
+              else "양재 → 선암TG → 사당IC → 사당역 → 이수 수작업 도로")
+        print("일반 차량·중앙차로 버스 주행 / 신호 주기는 실측값이 아닌 모형 설정")
+    else:
+        print_summary()
 
     # 2) 요청한 모드로 열기
     if args.netedit:

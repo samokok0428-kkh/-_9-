@@ -58,9 +58,9 @@ REWARD = {**REWARD_DEFAULTS, **REWARD_OVERRIDES}
 
 HPARAMS = dict(
     # ---- 최적화 ----
-    lr=1e-4,                 # 학습률. 보상이 요동치면 낮출 것 (3e-4 → 1e-4 → 5e-5)
+    lr=5e-5,                 # 학습률. 보상이 요동치면 낮출 것 (3e-4 → 1e-4 → 5e-5)
     n_steps=2048,            # rollout 길이. 크면 advantage 추정이 안정적
-    n_epochs=10,             # 모은 데이터 재사용 횟수
+    n_epochs=5,             # 모은 데이터 재사용 횟수
     minibatch_size=64,
 
     # ---- 할인 / advantage ----
@@ -88,7 +88,7 @@ HPARAMS = dict(
                                #   → 양자화 dead zone 제거. deterministic 평가에서도
                                #     argmax로 차선변경이 실제로 나온다. (권장)
                                # "gaussian": 예전 방식(전축 연속) — 비교 실험용
-    lane_keep_bias=0.5,        # hybrid 차선 head의 "유지" 초기 편향.
+    lane_keep_bias=0.58,        # hybrid 차선 head의 "유지" 초기 편향.
                                #   0.5 → 초기 (좌27%/유지45%/우27%) ≈ 55% 변경 시도 (공격적)
                                #   1.0 → ≈32% 시도 (보수적)
                                #   낮추면 탐험↑, 높이면 보수적

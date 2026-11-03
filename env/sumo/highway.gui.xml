@@ -1,5 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
 <viewsettings>
-    <scheme name="real world"/>
-    <viewport zoom="2400" x="200.0" y="-4.8" angle="0"/>
-    <delay value="100.0"/>
+  <scheme name="real world">
+    <polys polyMode="0" polyMinSize="0" />
+    <pois poiMode="0" poiMinSize="0" />
+  </scheme>
+  <viewport zoom="2618.821875" x="2125.835" y="5522.35" />
+  <delay value="100" />
 </viewsettings>
